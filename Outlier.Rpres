@@ -1,0 +1,374 @@
+<style>
+.small-code pre code {
+  font-size: 1em;
+}
+</style>
+
+Sentence outlier detection
+========================================================
+author: Magdiel Ablan
+date: 04-10-2017
+autosize: true
+
+Outline
+========================================================
+
+- Introduction
+- Stahel-Donoho Estimator (SDE)
+- PCout method
+- Test data sets
+- Data set simplification
+- Using SDE
+- Using PCout
+- Conclusion
+- Further work
+
+Introduction
+========================================================
+The following is a summary of the results so far of trying to adapt and implement
+the ideas on: *Unsupervised Detection of Anomalous Text* by David Guthrie (2008).
+
+ ![](portada.png)
+ 
+```{r,echo=FALSE, include=FALSE}
+#Libraries to use
+library(dplyr)
+#Distance measures:
+library(proxy)
+#In the mean time, for Stahel-Donoho method
+library(robustbase)
+library(rrcov)
+#Correlation plots
+library(FactoMineR)
+library(corrplot)
+#PCout
+library(mvoutlier)
+#Confusion table
+library(caret)
+library(knitr)
+```
+
+
+The Stahel-Donoho Estimator Distance
+========================================================
+This method consist on calculating projections of the 
+data which maximize an observations distance from the center of the observations 
+. I use the implementation in R package `rrcov` (Todorov, 2016).
+- This is implemented in function `SDEDist`. 
+- This function receives as input a table with the stats for all the sentences
+in a given story and a logical vector that indicates if the sentence is outlier. 
+- It returns:
+  + A vector with the distances of each sentence ordered from most likely outlier 
+to less likely 
+  + A flag indicating if the algorithm predicted the sentence as an outlier 
+  
+***
+![nube] (nube.png)
+
+```{r, echo=FALSE, include=FALSE}
+#This function calculates Stahel-Donoho Estimator Distance
+#Notice that the results may differ from run to run 
+SDEDist <-function(dat.mat,verdad) {
+  cv3= rrcov::CovSde(dat.mat)
+  #summary(cv3)
+  d2=getDistance(cv3)
+  list(distance=d2[order(d2,decreasing=TRUE)], pred=!getFlag(cv3)[order(d2,decreasing=TRUE)],ver=verdad[order(d2,decreasing=TRUE)])
+}
+```
+
+
+
+The PCOut method 
+========================================================
+This method identify multivariate outliers in high dimensional data sets by 
+measuring a sentence distance from the center of the observations in principal 
+component space using kurtosis to weight these components. The implementation I 
+use is in the R package `mvoutlier` (Filzmoser, 2017)
+- This is implemented in function `PCDist`.
+- Uses the same input and outputs as before
+
+```{r,echo=FALSE, include=FALSE}
+#This function calculates pcout estimation of outliness
+PCDist<-function(dat.mat,verdad) {
+  dat.out=mvoutlier:: pcout(dat.mat,makeplot=FALSE)
+  #Here closer to one indicates a greater degree of "outlieness" so the order is
+  #increasing
+  list(distance=dat.out$wfinal[order(dat.out$wfinal)],pred=!as.logical(dat.out$wfinal01[order(dat.out$wfinal)]),ver=verdad[order(dat.out$wfinal)])
+}
+
+```
+
+
+
+Test data sets
+========================================================
+- I use the **The Gold Rush** set of stories and **Earthquake Exemplar**.
+- The process is as follows:
+  + Take the sentences of level A1 story 
+  + Add one sentence of the same story set taken from the A6 or another higher level 
+  + This sentence was chosen because it is noticeable different in terms of 
+  parse tree depth or number and frequency of words
+- This first attempt has four cases, two for each set of stories
+***
+
+![test_data] (test_data.png)
+
+```{r, echo=FALSE}
+load("gold-all.RData")
+nsen.all=nrow(gold.all)
+#nsen.all
+flag=logical(nsen.all)
+fs=as.factor(gold.all$story)
+instance=as.numeric(fs)
+gold.test=bind_cols(gold.all[,1:2],data.frame(instance),gold.all[,3:17],data.frame(flag))
+
+temp=filter(gold.test,story=="The Gold Rush-A1")
+nsen=nrow(temp)
+gold.ins1=bind_rows(temp,gold.test[102,])
+gold.ins2=bind_rows(temp,gold.test[157,])
+
+gold.ins1$flag[nsen+1]=TRUE;
+gold.ins1$instance=rep(1,nsen+1);
+gold.ins1$story[nsen+1]="The Gold Rush-A1"
+
+gold.ins2$flag[nsen+1]=TRUE;
+gold.ins2$instance=rep(2,nsen+1);
+gold.ins2$story[nsen+1]="The Gold Rush-A1"
+
+goldA1u=gold.all[,-(1:2)]
+#gold.all[102,2]
+#gold.all[102,-(1:2)]
+#gold.all[157,2]
+#gold.all[157,-(1:2)]
+
+
+goldA11=data.frame(story=gold.ins1$story,instance=gold.ins1$instance,depth= jitter(gold.ins1$depth),
+                   words=gold.ins1$words, WF=gold.ins1$WF, Rank=gold.ins1$Rank,flag=gold.ins1$flag)
+
+goldA12=data.frame(story=gold.ins2$story,instance=gold.ins2$instance,depth= jitter(gold.ins2$depth),
+                   words=gold.ins2$words, WF=gold.ins2$WF, Rank=gold.ins2$Rank,flag=gold.ins2$flag)
+
+goldA1.test=bind_rows(goldA11,goldA12)
+
+
+#Creating two datasets with earth, each one with one outlier
+
+load("earth-all.RData")
+nsen.all=nrow(earth.all)
+#nsen.all
+flag=logical(nsen.all)
+fs=as.factor(earth.all$story)
+instance=as.numeric(fs)
+earth.test=bind_cols(earth.all[,1:2],data.frame(instance),earth.all[,3:17],data.frame(flag))
+
+
+temp=filter(earth.test,story=="Earthquake-A1")
+nsen=nrow(temp)
+earth.ins1=bind_rows(temp,earth.test[172,])
+earth.ins2=bind_rows(temp,earth.test[165,])
+
+earth.ins1$flag[nsen+1]=TRUE; 
+earth.ins1$instance=rep(1,nsen+1);
+earth.ins1$story[nsen+1]="Earthquake-A1"
+
+earth.ins2$flag[nsen+1]=TRUE;
+earth.ins2$instance=rep(2,nsen+1);
+earth.ins2$story[nsen+1]="Earthquake-A1"
+
+earthA11=data.frame(story=earth.ins1$story,instance=earth.ins1$instance,depth= jitter(earth.ins1$depth),
+                   words=earth.ins1$words, WF=earth.ins1$WF, Rank=earth.ins1$Rank,flag=earth.ins1$flag)
+
+earthA12=data.frame(story=earth.ins2$story,instance=earth.ins2$instance,depth= jitter(earth.ins2$depth),
+                   words=earth.ins2$words, WF=earth.ins2$WF, Rank=earth.ins2$Rank,flag=earth.ins2$flag)
+
+story.test=bind_rows(goldA11,goldA12,earthA11,earthA12)
+
+
+```
+
+
+
+Example using the Gold Rush series (1)
+========================================================
+class: small-code
+For one of the cases, the sentence added to the level 1 story was:
+
+```{r, echo=FALSE}
+gold.all[157,2]
+```
+that has the following stats:
+```{r, echo=FALSE}
+knitr::kable(gold.all[157,-(1:2)], digits=2, caption = "")
+#format(gold.all[157,-(1:2)],digits=3,trim=TRUE)
+```
+
+
+Example using the Gold Rush series (2)
+========================================================
+class: small-code
+Compared to the first sentences of the A1 story:
+
+```{r, echo=FALSE}
+temp=filter(gold.all,story=="The Gold Rush-A1")
+format(head(temp[,2],4),digits=3,trim=TRUE,justify = "left")
+```
+that has the following stats:
+```{r, echo=FALSE}
+knitr::kable(head(temp[,-(1:2)],4),digits=2)
+#format(head(temp[,-(1:2)],4),digits=3,trim=TRUE)
+```
+
+
+Data set simplification
+========================================================
+There is a great deal of correlation between these variables:
+
+```{r, echo=FALSE, fig.aline="center", fig.show="hold", fig.height=5, dpi=150}
+goldA1u=gold.all[,-(1:2)]
+gold.A1.cor=cor(goldA1u,use="na.or.complete",method = "spearman")
+corrplot(gold.A1.cor,order="hclust",title="",tl.cex=0.8,tl.col="black",
+         type="full",method="number",number.cex = 0.7,
+         addrect = 4,cl.pos="b")
+mtext("Spearman Correlation Matrix",side=2,line=1)
+mtext("Gold A1 contaminated",side=2,line=0)
+```
+
+
+A minimalist Data set 
+========================================================
+The methods require independence of the variables so only
+the following variables were kept:
+
+- depth
+
+- words
+
+- WF
+
+- Rank
+
+
+Confusion matrix (1)
+========================================================
+
+https://en.wikipedia.org/wiki/Confusion_matrix
+
+![confusion] (confusion1.png)
+![confusuion 2] (confusion2.png)
+
+
+
+Confusion matrix (2)
+========================================================
+![confusion 2] (masconfusion.png)
+
+
+Using SDE y PCDist 
+========================================================
+class: small-code
+left: 50%
+
+- SDE:
+```{r, echo=FALSE}
+st.rows=nrow(story.test)
+
+cuentos=distinct(story.test,story)
+n.cuentos=nrow(cuentos)
+casos = distinct(story.test,instance)
+n.casos = nrow(distinct(story.test,instance))
+pos.SDE=numeric()
+pos.PCDist=pos.SDE
+tabla.SDE=data.frame(distance=numeric(),pred=logical(),ver=logical())
+tabla.PCDist=tabla.SDE
+for (i in 1:n.cuentos) {
+  for (j in 1:n.casos) {
+    estudio=filter(story.test,story==cuentos$story[i],instance==casos$instance[j])
+
+    estudio.SDE=SDEDist(estudio[,-c(1,2,7)],estudio[,7])
+    tabla.SDE=bind_rows(tabla.SDE,estudio.SDE)
+    lugar.SDE=(estudio.SDE$ver==TRUE) & (estudio.SDE$ver==estudio.SDE$pred)
+    pos1=match(TRUE,lugar.SDE)
+    pos.SDE=cbind(pos.SDE,pos1)
+    
+    estudio.PCDist=PCDist(estudio[,-c(1,2,7)],estudio[,7])
+    tabla.PCDist=bind_rows(tabla.PCDist,estudio.PCDist)
+    lugar.PCDist=(estudio.PCDist$ver==TRUE) & (estudio.PCDist$ver==estudio.PCDist$pred)
+    pos2=match(TRUE,lugar.PCDist)
+    pos.PCDist=cbind(pos.PCDist,pos2)
+    
+    
+  }
+}
+mat.SDE.t=table(truth=tabla.SDE$ver,prediction=tabla.SDE$pred)
+mat.SDE = mat.SDE.t
+
+#Changing the format of the table to have the same layout as wikipedia:
+mat.SDE[1,]=mat.SDE.t[2,]
+mat.SDE[2,]=mat.SDE.t[1,]
+
+mat.SDE.t = mat.SDE
+
+mat.SDE[,1]=mat.SDE.t[,2]
+mat.SDE[,2]=mat.SDE.t[,1]
+
+dimnames(mat.SDE)=list(truth=c("TRUE","FALSE"),prediction=c("TRUE","FALSE"))
+
+
+confusion.SDE=confusionMatrix(mat.SDE,positive="TRUE")
+confusion.SDE
+
+```
+
+***
+- PCDist:
+
+```{r, echo=FALSE}
+mat.PCDist.t=table(truth=tabla.PCDist$ver,prediction=tabla.PCDist$pred)
+mat.PCDist= mat.PCDist.t
+
+#Changing the format of the table to have the same layout as wikipedia:
+mat.PCDist[1,]=mat.PCDist.t[2,]
+mat.PCDist[2,]=mat.PCDist.t[1,]
+
+mat.PCDist.t = mat.PCDist
+
+mat.PCDist[,1]=mat.PCDist.t[,2]
+mat.PCDist[,2]=mat.PCDist.t[,1]
+
+dimnames(mat.PCDist)=list(truth=c("TRUE","FALSE"),prediction=c("TRUE","FALSE"))
+
+
+confusion.PCDist=confusionMatrix(mat.PCDist,positive="TRUE")
+confusion.PCDist
+
+```
+
+Conclusions 
+========================================================
+- Promising results, considering it is not a fully automated process
+- For this test set, PCDist functions slightly better than SDE
+
+Further work 
+========================================================
+- Improvements on performance using scaling
+- Outliers only in one direction
+- Optimizing the threshold 
+- Building a database of training an test cases
+
+             
+========================================================
+<style>
+
+p#myPara{
+  color: steelblue;
+  font-family: garamond;
+  font-size: 1.5em;
+}
+
+</style>
+
+
+
+<h1> Is it worth to keep pursuing this path? </h1>
+
+
